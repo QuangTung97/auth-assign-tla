@@ -3,7 +3,7 @@ EXTENDS TLC, Naturals
 
 CONSTANT User, nil
 
-VARIABLES db_assign, handle_status,
+VARIABLES db_assign,
     want_assign, want_changes,
     disk_assign,
     pc, local_wanted, local_user, num_downtime
@@ -15,20 +15,16 @@ max_down_times == 2
 NullUser == User \union {nil}
 
 want_vars == <<want_assign, want_changes>>
-job_vars == <<handle_status, pc, local_wanted, local_user, num_downtime>>
+job_vars == <<pc, local_wanted, local_user, num_downtime>>
 
 vars == <<db_assign, want_vars, disk_assign, job_vars>>
 
-
 DBStatus == {"null", "handling", "added"}
-
-HandleStatus == {"null", "processing"}
 
 DiskStatus == {"active", "null"}
 
 TypeOK ==
     /\ db_assign \in [User -> DBStatus]
-    /\ handle_status \in [User -> HandleStatus]
     /\ want_assign \subseteq User
     /\ want_changes \in 0..max_want_changes
     /\ disk_assign \in [User -> DiskStatus]
@@ -40,7 +36,6 @@ TypeOK ==
 
 Init == 
     /\ db_assign = [u \in User |-> "null"]
-    /\ handle_status = [u \in User |-> "null"]
     /\ want_assign = {}
     /\ want_changes = 0
     /\ disk_assign = [u \in User |-> "null"]
@@ -83,13 +78,13 @@ noDifferenceBetweenWantedAndDB ==
 GetFromWanted(u) ==
     /\ pc = "Init"
     /\ \/ ~noDifferenceForUser(u) \* enable if there is a difference
-       \/ handle_status[u] = "processing"
+       \/ db_assign[u] = "handling"
     /\ pc' = "ReadDB"
     /\ local_user' = u
     /\ local_wanted' = (u \in want_assign)
     /\ UNCHANGED num_downtime
     /\ UNCHANGED want_vars
-    /\ UNCHANGED <<db_assign, handle_status>>
+    /\ UNCHANGED db_assign
     /\ UNCHANGED disk_assign
 
 
@@ -100,30 +95,30 @@ resetToInit ==
 
 
 
-setHandleProcessing ==
-    /\ handle_status' = [handle_status EXCEPT ![local_user] = "processing"]
+setDBHandling ==
+    /\ db_assign' = [db_assign EXCEPT ![local_user] = "handling"]
 
 
 getFromDBHandleWanted ==
-    IF db_assign[local_user] = "null" \/ handle_status[local_user] = "processing"
+    IF db_assign[local_user] \in {"null", "handling"}
         THEN
             /\ pc' = "AssignPerm"
-            /\ setHandleProcessing
+            /\ setDBHandling
             /\ UNCHANGED <<local_user, local_wanted>>
         ELSE
             /\ resetToInit
-            /\ UNCHANGED handle_status
+            /\ UNCHANGED db_assign
 
 
 getFromDBHandleNotWanted ==
-    IF db_assign[local_user] = "added" \/ handle_status[local_user] = "processing"
+    IF db_assign[local_user] \in {"added", "handling"}
         THEN
             /\ pc' = "RemovePerm"
-            /\ setHandleProcessing
+            /\ setDBHandling
             /\ UNCHANGED <<local_user, local_wanted>>
-        ELSE
+        ELSE 
             /\ resetToInit
-            /\ UNCHANGED handle_status
+            /\ UNCHANGED db_assign
 
 
 GetFromDB ==
@@ -133,7 +128,6 @@ GetFromDB ==
         ELSE getFromDBHandleNotWanted
     /\ UNCHANGED num_downtime
     /\ UNCHANGED want_vars
-    /\ UNCHANGED db_assign
     /\ UNCHANGED disk_assign
 
 
@@ -144,7 +138,7 @@ AssignPerm ==
     /\ UNCHANGED <<local_user, local_wanted>>
     /\ UNCHANGED num_downtime
     /\ UNCHANGED want_vars
-    /\ UNCHANGED <<db_assign, handle_status>>
+    /\ UNCHANGED db_assign
 
 
 RemovePerm ==
@@ -154,7 +148,7 @@ RemovePerm ==
     /\ UNCHANGED <<local_user, local_wanted>>
     /\ UNCHANGED num_downtime
     /\ UNCHANGED want_vars
-    /\ UNCHANGED <<db_assign, handle_status>>
+    /\ UNCHANGED db_assign
 
 
 UpdateDB ==
@@ -163,7 +157,6 @@ UpdateDB ==
         THEN db_assign' = [db_assign EXCEPT ![local_user] = "added"]
         ELSE db_assign' = [db_assign EXCEPT ![local_user] = "null"]
     /\ resetToInit
-    /\ handle_status' = [handle_status EXCEPT ![local_user] = "null"]
     /\ UNCHANGED num_downtime
     /\ UNCHANGED disk_assign
     /\ UNCHANGED want_vars
@@ -174,7 +167,7 @@ DownTime ==
     /\ num_downtime' = num_downtime + 1
     /\ pc # "Init"
     /\ resetToInit
-    /\ UNCHANGED <<want_assign, db_assign, handle_status, disk_assign>>
+    /\ UNCHANGED <<want_assign, db_assign, disk_assign>>
     /\ UNCHANGED want_changes
 
 
@@ -182,7 +175,7 @@ TerminateCond ==
     /\ want_changes = max_want_changes
     /\ pc = "Init"
     /\ noDifferenceBetweenWantedAndDB
-    /\ \A u \in User: handle_status[u] = "null"
+    /\ \A u \in User: db_assign[u] # "handling"
 
 Terminated ==
     /\ TerminateCond
