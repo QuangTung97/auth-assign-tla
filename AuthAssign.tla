@@ -3,7 +3,7 @@ EXTENDS TLC, Naturals
 
 CONSTANT User, nil
 
-VARIABLES db_assign,
+VARIABLES db_assign, handle_status,
     want_assign, want_changes,
     disk_assign,
     pc, local_wanted, local_user, num_downtime
@@ -15,17 +15,20 @@ max_down_times == 2
 NullUser == User \union {nil}
 
 want_vars == <<want_assign, want_changes>>
-job_vars == <<pc, local_wanted, local_user, num_downtime>>
+job_vars == <<handle_status, pc, local_wanted, local_user, num_downtime>>
 
 vars == <<db_assign, want_vars, disk_assign, job_vars>>
 
 
-DBStatus == {"null", "added"}
+DBStatus == {"null", "handling", "added"}
+
+HandleStatus == {"null", "processing"}
 
 DiskStatus == {"active", "null"}
 
 TypeOK ==
     /\ db_assign \in [User -> DBStatus]
+    /\ handle_status \in [User -> HandleStatus]
     /\ want_assign \subseteq User
     /\ want_changes \in 0..max_want_changes
     /\ disk_assign \in [User -> DiskStatus]
@@ -37,6 +40,7 @@ TypeOK ==
 
 Init == 
     /\ db_assign = [u \in User |-> "null"]
+    /\ handle_status = [u \in User |-> "null"]
     /\ want_assign = {}
     /\ want_changes = 0
     /\ disk_assign = [u \in User |-> "null"]
@@ -78,13 +82,14 @@ noDifferenceBetweenWantedAndDB ==
 
 GetFromWanted(u) ==
     /\ pc = "Init"
-    /\ ~noDifferenceForUser(u) \* enable if there is a difference
+    /\ \/ ~noDifferenceForUser(u) \* enable if there is a difference
+       \/ handle_status[u] = "processing"
     /\ pc' = "ReadDB"
     /\ local_user' = u
     /\ local_wanted' = (u \in want_assign)
     /\ UNCHANGED num_downtime
     /\ UNCHANGED want_vars
-    /\ UNCHANGED db_assign
+    /\ UNCHANGED <<db_assign, handle_status>>
     /\ UNCHANGED disk_assign
 
 
@@ -94,20 +99,31 @@ resetToInit ==
     /\ local_wanted' = FALSE
 
 
+
+setHandleProcessing ==
+    /\ handle_status' = [handle_status EXCEPT ![local_user] = "processing"]
+
+
 getFromDBHandleWanted ==
-    IF db_assign[local_user] = "null"
+    IF db_assign[local_user] = "null" \/ handle_status[local_user] = "processing"
         THEN
             /\ pc' = "AssignPerm"
+            /\ setHandleProcessing
             /\ UNCHANGED <<local_user, local_wanted>>
-        ELSE resetToInit
+        ELSE
+            /\ resetToInit
+            /\ UNCHANGED handle_status
 
 
 getFromDBHandleNotWanted ==
-    IF db_assign[local_user] = "added"
+    IF db_assign[local_user] = "added" \/ handle_status[local_user] = "processing"
         THEN
             /\ pc' = "RemovePerm"
+            /\ setHandleProcessing
             /\ UNCHANGED <<local_user, local_wanted>>
-        ELSE resetToInit
+        ELSE
+            /\ resetToInit
+            /\ UNCHANGED handle_status
 
 
 GetFromDB ==
@@ -128,7 +144,7 @@ AssignPerm ==
     /\ UNCHANGED <<local_user, local_wanted>>
     /\ UNCHANGED num_downtime
     /\ UNCHANGED want_vars
-    /\ UNCHANGED db_assign
+    /\ UNCHANGED <<db_assign, handle_status>>
 
 
 RemovePerm ==
@@ -138,7 +154,7 @@ RemovePerm ==
     /\ UNCHANGED <<local_user, local_wanted>>
     /\ UNCHANGED num_downtime
     /\ UNCHANGED want_vars
-    /\ UNCHANGED db_assign
+    /\ UNCHANGED <<db_assign, handle_status>>
 
 
 UpdateDB ==
@@ -147,6 +163,7 @@ UpdateDB ==
         THEN db_assign' = [db_assign EXCEPT ![local_user] = "added"]
         ELSE db_assign' = [db_assign EXCEPT ![local_user] = "null"]
     /\ resetToInit
+    /\ handle_status' = [handle_status EXCEPT ![local_user] = "null"]
     /\ UNCHANGED num_downtime
     /\ UNCHANGED disk_assign
     /\ UNCHANGED want_vars
@@ -157,7 +174,7 @@ DownTime ==
     /\ num_downtime' = num_downtime + 1
     /\ pc # "Init"
     /\ resetToInit
-    /\ UNCHANGED <<want_assign, db_assign, disk_assign>>
+    /\ UNCHANGED <<want_assign, db_assign, handle_status, disk_assign>>
     /\ UNCHANGED want_changes
 
 
@@ -165,6 +182,7 @@ TerminateCond ==
     /\ want_changes = max_want_changes
     /\ pc = "Init"
     /\ noDifferenceBetweenWantedAndDB
+    /\ \A u \in User: handle_status[u] = "null"
 
 Terminated ==
     /\ TerminateCond
