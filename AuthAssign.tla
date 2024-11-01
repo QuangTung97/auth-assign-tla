@@ -8,9 +8,9 @@ VARIABLES db_assign,
     disk_assign,
     pc, local_wanted, local_user, num_downtime
 
-max_want_changes == 5
+max_want_changes == 10
 
-max_down_times == 2
+max_down_times == 3
 
 NullUser == User \union {nil}
 
